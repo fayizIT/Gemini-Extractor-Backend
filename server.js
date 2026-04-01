@@ -18,7 +18,9 @@ const COLLECTION = process.env.COLLECTION || 'voters'
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.use(cors({
-  origin: [ '*'], // Allow all origins (for development). In production, specify your frontend URL(s) here.
+  origin: ['https://anthropic-extracting.vercel.app'],
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'x-api-key']
 }))
 app.use(express.json({ limit: '200mb' }))
 
