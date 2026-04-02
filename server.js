@@ -19,9 +19,11 @@ const COLLECTION = process.env.COLLECTION || 'voters'
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.use(cors({
-  origin: ['https://anthropic-extracting.vercel.app','http://localhost:5173'],
+  origin: ['https://anthropic-extracting.vercel.app', 'http://localhost:5173'],
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'x-api-key']
+  allowedHeaders: ['Content-Type', 'x-api-key'],
+  credentials: true,  // If you're using cookies/auth
+  exposedHeaders: ['Content-Type'],  // For SSE
 }))
 app.use(express.json({ limit: '200mb' }))
 
