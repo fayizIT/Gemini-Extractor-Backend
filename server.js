@@ -7,18 +7,19 @@ const express         = require('express')
 const cors            = require('cors')
 const https           = require('https')
 const { MongoClient } = require('mongodb')
+const { ObjectId } = require('mongodb')
 
 const app  = express()
 const PORT = 3001
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const MONGO_URI  = process.env.MONGO_URI  || 'mongodb+srv://Voter-List:Voter-List@voter-list.hx0pqbh.mongodb.net'
+const MONGO_URI  =  'mongodb+srv://Voter-List:Voter-List@voter-list.hx0pqbh.mongodb.net'
 const DB_NAME    = process.env.DB_NAME    || 'test'
 const COLLECTION = process.env.COLLECTION || 'voters'
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.use(cors({
-  origin: ['https://anthropic-extracting.vercel.app'],
+  origin: ['https://anthropic-extracting.vercel.app','http://localhost:5173'],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'x-api-key']
 }))
@@ -38,14 +39,14 @@ async function getDb() {
 const ALLOWED_UPDATE = new Set([
   'nameMl', 'nameEn', 'age', 'gender',
   'relationType', 'relationNameMl', 'relationNameEn',
-  'houseMl', 'houseEn', 'slNo',
+  'houseMl','boothId', 'houseEn', 'slNo',
 ])
 
 // ─── Allowed fields for INSERT (PDF-only new voters) ─────────────────────────
 const ALLOWED_INSERT = new Set([
   'voterId', 'slNo', 'nameMl', 'nameEn', 'age', 'gender',
   'relationType', 'relationNameMl', 'relationNameEn',
-  'houseMl', 'houseEn', 'auditStatus', 'lastAuditedAt', 'createdAt',
+  'houseMl','boothId', 'houseEn', 'auditStatus', 'lastAuditedAt', 'createdAt',
 ])
 
 function sanitizeUpdate(fields) {
@@ -57,13 +58,38 @@ function sanitizeUpdate(fields) {
   return { safe, rejected }
 }
 
+// function sanitizeInsert(record) {
+//   const safe = {}
+//   for (const [k, v] of Object.entries(record)) {
+//     if (ALLOWED_INSERT.has(k) && v !== undefined && v !== null && v !== '') {
+//       safe[k] = k === 'age' ? (parseInt(v) || v) : typeof v === 'string' ? v.trim() : v
+//     }
+//   }
+//   return safe
+// }
 function sanitizeInsert(record) {
   const safe = {}
+
   for (const [k, v] of Object.entries(record)) {
     if (ALLOWED_INSERT.has(k) && v !== undefined && v !== null && v !== '') {
-      safe[k] = k === 'age' ? (parseInt(v) || v) : typeof v === 'string' ? v.trim() : v
+
+      if (k === 'age') {
+        safe[k] = parseInt(v) || v
+
+      } else if (k === 'boothId') {
+        // 🔥 CONVERT HERE
+        try {
+          safe[k] = new ObjectId(v)
+        } catch {
+          console.warn("⚠️ Invalid boothId:", v)
+        }
+
+      } else {
+        safe[k] = typeof v === 'string' ? v.trim() : v
+      }
     }
   }
+
   return safe
 }
 
@@ -158,7 +184,8 @@ async function splitPdfBase64(base64Pdf, chunkSize) {
   console.log(`📄 PDF has ${totalPages} pages, splitting into chunks of ${chunkSize}`)
 
   const chunks = []
-  for (let start = 0; start < totalPages; start += chunkSize) {
+  const START_PAGE = 2
+  for (let start = START_PAGE; start < totalPages; start += chunkSize) {
     const end = Math.min(start + chunkSize, totalPages)
     const newDoc = await PDFDocument.create()
     const indices = Array.from({ length: end - start }, (_, i) => start + i)
@@ -246,7 +273,7 @@ Return ONLY a raw JSON array (no markdown, no backticks, no explanation):
 // Body: { base64Pdf, apiKey, model?, chunkSize? }
 // Streams Server-Sent Events: { type: 'progress'|'done'|'error'|'warning', msg, pct, voters? }
 app.post('/api/extract-pdf', async (req, res) => {
-  const { base64Pdf, apiKey, model = 'gemini-2.5-flash', chunkSize = 25 } = req.body
+  const { base64Pdf, apiKey, model = 'gemini-2.5-flash', chunkSize = 10 } = req.body
   if (!base64Pdf) return res.status(400).json({ error: 'Missing base64Pdf' })
   if (!apiKey)    return res.status(400).json({ error: 'Missing apiKey' })
 
@@ -407,7 +434,32 @@ app.post('/api/update-voters-bulk', async (req, res) => {
       if (!safe.voterId) continue
       try {
         const existing = await col.findOne({ voterId: safe.voterId })
-        if (existing) { insertSkipped++; continue }
+        // if (existing) {
+        //   console.log("Updating voter:", record.voterId, "→ boothId:", record.boothId)
+        //   insertSkipped++; continue }
+        if (existing) {
+  console.log("🔁 Updating voter:", record.voterId, "→ boothId:", record.boothId)
+
+  if (!record.boothId) {
+    console.warn("⚠️ Missing boothId for", record.voterId)
+    insertSkipped++
+    continue
+  }
+
+  await col.updateOne(
+    { voterId: safe.voterId },
+    {
+      $set: {
+        boothId: new ObjectId(record.boothId),boothId: safe.boothId || new ObjectId(record.boothId),// 🔥 CRITICAL
+        slNo: safe.slNo || existing.slNo,
+        updatedAt: new Date().toISOString()
+      }
+    }
+  )
+
+  insertSkipped++
+  continue
+}
         await col.insertOne(safe)
         insertSuccess++
       } catch (e) { insertFailed++; errors.push({ voterId: record.voterId, error: e.message }) }
@@ -424,6 +476,37 @@ app.post('/api/update-voters-bulk', async (req, res) => {
       totalSent:     updates.length + inserts.length,
       errors:        errors.slice(0, 20),
     })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  } finally {
+    if (client) await client.close()
+  }
+})
+
+
+app.post('/api/check-voter', async (req, res) => {
+  const { voterId } = req.body
+
+  if (!voterId) {
+    return res.status(400).json({ error: 'Missing voterId' })
+  }
+
+  let client
+  try {
+    const conn = await getDb()
+    client = conn.client
+
+    const voter = await conn.col.findOne({ voterId })
+
+    if (voter) {
+      return res.json({
+        exists: true,
+        boothId: voter.boothId
+      })
+    }
+
+    return res.json({ exists: false })
+
   } catch (err) {
     res.status(500).json({ error: err.message })
   } finally {
