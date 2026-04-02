@@ -436,32 +436,32 @@ app.post('/api/update-voters-bulk', async (req, res) => {
       if (!safe.voterId) continue
       try {
         const existing = await col.findOne({ voterId: safe.voterId })
-        // if (existing) {
-        //   console.log("Updating voter:", record.voterId, "→ boothId:", record.boothId)
-        //   insertSkipped++; continue }
         if (existing) {
-  console.log("🔁 Updating voter:", record.voterId, "→ boothId:", record.boothId)
+          console.log("Updating voter:", record.voterId, "→ boothId:", record.boothId)
+          insertSkipped++; continue }
+//         if (existing) {
+//   console.log("🔁 Updating voter:", record.voterId, "→ boothId:", record.boothId)
 
-  if (!record.boothId) {
-    console.warn("⚠️ Missing boothId for", record.voterId)
-    insertSkipped++
-    continue
-  }
+//   if (!record.boothId) {
+//     console.warn("⚠️ Missing boothId for", record.voterId)
+//     insertSkipped++
+//     continue
+//   }
 
-  await col.updateOne(
-    { voterId: safe.voterId },
-    {
-      $set: {
-        boothId: new ObjectId(record.boothId),boothId: safe.boothId || new ObjectId(record.boothId),// 🔥 CRITICAL
-        slNo: safe.slNo || existing.slNo,
-        updatedAt: new Date().toISOString()
-      }
-    }
-  )
+//   await col.updateOne(
+//     { voterId: safe.voterId },
+//     {
+//       $set: {
+//         boothId: new ObjectId(record.boothId),boothId: safe.boothId || new ObjectId(record.boothId),// 🔥 CRITICAL
+//         slNo: safe.slNo || existing.slNo,
+//         updatedAt: new Date().toISOString()
+//       }
+//     }
+//   )
 
-  insertSkipped++
-  continue
-}
+//   insertSkipped++
+//   continue
+// }
         await col.insertOne(safe)
         insertSuccess++
       } catch (e) { insertFailed++; errors.push({ voterId: record.voterId, error: e.message }) }
