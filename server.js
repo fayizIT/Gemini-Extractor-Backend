@@ -238,8 +238,7 @@ This is chunk ${chunkIdx + 1} of ${totalChunks}. Extract EVERY voter card visibl
 Gender: "Male" or "Female" based on column position (left column = Male, right column = Female).
 Transliterate ALL Malayalam text to English for nameEn, houseEn, relationNameEn fields.
 
-Return ONLY a raw JSON array (no markdown, no backticks, no explanation):
-[{"slNo":"1","voterId":"UAZ1489186","nameMl":"ബിബിൻ ബാബു","nameEn":"Bibin Babu","age":27,"gender":"Male","relationType":"Father","relationNameMl":"ബാബു","relationNameEn":"Babu","houseMl":"പാറയ്ക്കൽ","houseEn":"Parayakkal"}]`
+Return ONLY a raw JSON array (no markdown, no backticks, no explanation):`
 
   const result = await callGemini(apiKey, model, {
     contents: [{
