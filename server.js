@@ -51,11 +51,32 @@ const ALLOWED_INSERT = new Set([
   'houseMl','boothId', 'houseEn', 'auditStatus', 'lastAuditedAt', 'createdAt',
 ])
 
+// function sanitizeUpdate(fields) {
+//   const safe = {}, rejected = []
+//   for (const [k, v] of Object.entries(fields)) {
+//     if (ALLOWED_UPDATE.has(k)) safe[k] = k === 'age' ? (parseInt(v) || v) : String(v).trim()
+//     else rejected.push(k)
+//   }
+//   return { safe, rejected }
+// }
+
+
 function sanitizeUpdate(fields) {
   const safe = {}, rejected = []
   for (const [k, v] of Object.entries(fields)) {
-    if (ALLOWED_UPDATE.has(k)) safe[k] = k === 'age' ? (parseInt(v) || v) : String(v).trim()
-    else rejected.push(k)
+    if (k === 'boothId') {
+      try {
+        safe[k] = new ObjectId(String(v).trim())
+        console.log(`✅ boothId converted to ObjectId: ${safe[k]}`)
+      } catch {
+        console.warn(`⚠️ Invalid boothId "${v}" — rejected`)
+        rejected.push(k)
+      }
+    } else if (ALLOWED_UPDATE.has(k)) {
+      safe[k] = k === 'age' ? (parseInt(v) || v) : String(v).trim()
+    } else {
+      rejected.push(k)
+    }
   }
   return { safe, rejected }
 }
@@ -69,26 +90,56 @@ function sanitizeUpdate(fields) {
 //   }
 //   return safe
 // }
+
+// ==========
+// function sanitizeInsert(record) {
+//   const safe = {}
+
+//   for (const [k, v] of Object.entries(record)) {
+//     if (ALLOWED_INSERT.has(k) && v !== undefined && v !== null && v !== '') {
+
+//       if (k === 'age') {
+//         safe[k] = parseInt(v) || v
+
+//       } else if (k === 'boothId') {
+//         // 🔥 CONVERT HERE
+//         console.log(`🔍 boothId received: "${v}" (type: ${typeof v}, length: ${String(v).length})`)
+//         try {
+//           safe[k] = new ObjectId(String(v).trim());
+//           console.log(`✅ boothId converted to ObjectId: ${safe[k]}`)
+//         } catch(err) {
+//           console.warn(`⚠️ ObjectId conversion failed for "${v}":`, err.message)
+//         }
+
+//       } else {
+//         safe[k] = typeof v === 'string' ? v.trim() : v
+//       }
+//     }
+//   }
+
+//   return safe
+// }
+
 function sanitizeInsert(record) {
   const safe = {}
 
   for (const [k, v] of Object.entries(record)) {
-    if (ALLOWED_INSERT.has(k) && v !== undefined && v !== null && v !== '') {
+    if (!ALLOWED_INSERT.has(k) || v === undefined || v === null || v === '') continue
 
-      if (k === 'age') {
-        safe[k] = parseInt(v) || v
+    if (k === 'age') {
+      safe[k] = parseInt(v) || v
 
-      } else if (k === 'boothId') {
-        // 🔥 CONVERT HERE
-        try {
-          safe[k] = new ObjectId(v)
-        } catch {
-          console.warn("⚠️ Invalid boothId:", v)
-        }
-
-      } else {
-        safe[k] = typeof v === 'string' ? v.trim() : v
+    } else if (k === 'boothId') {
+      console.log(`🔍 boothId raw value: "${v}" | type: ${typeof v} | length: ${String(v).length}`)
+      try {
+        safe[k] = new ObjectId(String(v).trim())
+        console.log(`✅ boothId → ObjectId: ${safe[k]}`)
+      } catch (err) {
+        console.warn(`⚠️ ObjectId conversion failed: ${err.message}`)
       }
+
+    } else {
+      safe[k] = typeof v === 'string' ? v.trim() : v
     }
   }
 
@@ -187,8 +238,9 @@ async function splitPdfBase64(base64Pdf, chunkSize) {
 
   const chunks = []
   const START_PAGE = 2
+  const OVERLAP = 1
   for (let start = START_PAGE; start < totalPages; start += chunkSize) {
-    const end = Math.min(start + chunkSize, totalPages)
+    const end = Math.min(start + chunkSize+ OVERLAP, totalPages)
     const newDoc = await PDFDocument.create()
     const indices = Array.from({ length: end - start }, (_, i) => start + i)
     const pages = await newDoc.copyPages(srcDoc, indices)
@@ -356,12 +408,39 @@ app.post('/api/gemini', (req, res) => {
 })
 
 // ─── SINGLE UPDATE ────────────────────────────────────────────────────────────
+// app.post('/api/update-voter', async (req, res) => {
+//   const { voterId, fields } = req.body
+//   if (!voterId) return res.status(400).json({ error: 'Missing voterId' })
+//   if (!fields || !Object.keys(fields).length) return res.status(400).json({ error: 'Missing fields' })
+//   const { safe, rejected } = sanitizeUpdate(fields)
+//   if (!Object.keys(safe).length) return res.status(400).json({ error: 'No allowed fields', rejected })
+//   let client
+//   try {
+//     const conn = await getDb(); client = conn.client
+//     const result = await conn.col.updateOne(
+//       { voterId },
+//       { $set: { ...safe, auditStatus: 'corrected', lastAuditedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } }
+//     )
+//     if (result.matchedCount === 0) return res.status(404).json({ error: `Voter not found: ${voterId}` })
+//     console.log(`✅ Updated ${voterId}`)
+//     res.json({ success: true, voterId, modifiedCount: result.modifiedCount, updatedFields: Object.keys(safe), rejectedFields: rejected })
+//   } catch (err) {
+//     res.status(500).json({ error: err.message })
+//   } finally {
+//     if (client) await client.close()
+//   }
+// })
 app.post('/api/update-voter', async (req, res) => {
-  const { voterId, fields } = req.body
+  const { voterId, fields,boothId } = req.body
   if (!voterId) return res.status(400).json({ error: 'Missing voterId' })
   if (!fields || !Object.keys(fields).length) return res.status(400).json({ error: 'Missing fields' })
+
   const { safe, rejected } = sanitizeUpdate(fields)
   if (!Object.keys(safe).length) return res.status(400).json({ error: 'No allowed fields', rejected })
+
+  console.log(`📝 Updating ${voterId} → fields: ${Object.keys(safe).join(', ')}`)
+  if (rejected.length) console.warn(`⚠️ Rejected fields for ${voterId}:`, rejected)
+
   let client
   try {
     const conn = await getDb(); client = conn.client
@@ -370,9 +449,11 @@ app.post('/api/update-voter', async (req, res) => {
       { $set: { ...safe, auditStatus: 'corrected', lastAuditedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } }
     )
     if (result.matchedCount === 0) return res.status(404).json({ error: `Voter not found: ${voterId}` })
-    console.log(`✅ Updated ${voterId}`)
+
+    console.log(`✅ Updated ${voterId} — modified: ${result.modifiedCount}`)
     res.json({ success: true, voterId, modifiedCount: result.modifiedCount, updatedFields: Object.keys(safe), rejectedFields: rejected })
   } catch (err) {
+    console.error(`❌ Update failed for ${voterId}:`, err.message)
     res.status(500).json({ error: err.message })
   } finally {
     if (client) await client.close()
@@ -382,14 +463,28 @@ app.post('/api/update-voter', async (req, res) => {
 // ─── SINGLE INSERT (PDF-only voter — skip if already exists by voterId) ───────
 app.post('/api/insert-voter', async (req, res) => {
   const { record } = req.body
+
+  console.log(req.body,"bodyyyy");
+  
   if (!record || !record.voterId) return res.status(400).json({ error: 'Missing record or voterId' })
+  console.log(`📥 Insert request for ${record.voterId}, boothId: "${record.boothId}" (type: ${typeof record.boothId})`)
   const safe = sanitizeInsert(record)
+  // Log what sanitize produced
+  console.log(`🔍 Sanitized boothId:`, safe.boothId)
   if (!safe.voterId) return res.status(400).json({ error: 'voterId required' })
   let client
   try {
     const conn = await getDb(); client = conn.client
     const existing = await conn.col.findOne({ voterId: safe.voterId })
     if (existing) {
+      if (safe.boothId && (!existing.boothId || typeof existing.boothId === 'string')) {
+        await conn.col.updateOne(
+          { voterId: safe.voterId },
+          { $set: { boothId: safe.boothId, updatedAt: new Date().toISOString() } }
+        )
+        console.log(`🔧 Patched boothId for existing voter: ${safe.voterId}`)
+        return res.json({ success: true, voterId: safe.voterId, inserted: false, patched: true, message: 'boothId patched' })
+      }
       return res.json({ success: true, voterId: safe.voterId, inserted: false, message: 'Already exists — skipped' })
     }
     await conn.col.insertOne(safe)
